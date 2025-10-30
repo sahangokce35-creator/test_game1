@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Neon Starfield Battle</title>
+<style>
+ html,body{margin:0;background:#000;overflow:hidden;}
+ canvas{display:block;margin:auto;background:radial-gradient(circle at 50% 40%,#08122a 0%,#000 70%);}
+ #leftPad,#rightPad{
+   position:fixed;bottom:12%;width:140px;height:140px;border-radius:50%;
+   border:2px solid rgba(255,255,255,.2);
+   background:radial-gradient(circle,rgba(255,255,255,.08),rgba(255,255,255,.02));
+   pointer-events:auto;transition:opacity .6s;opacity:.6;
+ }
+ #leftPad{left:5%;}
+ #rightPad{right:5%;display:grid;place-items:center;}
+ #rightPad::after{content:'FIRE';color:#ffdd55;font-weight:900;font-family:monospace;font-size:14px;}
+</style>
+</head>
+<body>
+<audio id="theme" src="https://cdn.pixabay.com/download/audio/2023/04/15/audio_59e3e9a02c.mp3?filename=star-wars-theme-epic-cover.mp3" preload="auto" loop></audio>
+<canvas id="game" width="900" height="600"></canvas>
+<div id="leftPad"></div><div id="rightPad"></div>
+
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+const music=document.getElementById("theme");
+const keys={},stars=[],bullets=[],enemies=[];
+let score=0,level=1,state="crawl",crawlY=canvas.height*0.9;
+const player={x:120,y:canvas.height/2,r:14,speed:5,cd:0,alive:true};
+const hiKey="neon-starfield-hi";let audioCtx;let audioUnlocked=false;
+
+/* ---- sound ---- */
+function sfx(f=440,t="square",d=.1,v=.05){
+ try{
+  audioCtx=audioCtx||new(AudioContext||webkitAudioContext)();
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.type=t;o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(audioCtx.destination);
+  o.start();o.stop(audioCtx.currentTime+d);
+ }catch(e){}
+}
+
+/* ---- stars ---- */
+function makeStars(n=220){stars.length=0;for(let i=0;i<n;i++)stars.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,size:Math.random()*2,speed:Math.random()*1.5+.4});}
+makeStars();
+function drawStars(dt=.016){ctx.fillStyle="#fff";for(const s of stars){ctx.beginPath();ctx.arc(s.x,s.y,s.size,0,Math.PI*2);ctx.fill();s.x-=s.speed*(state==="crawl"?0.5:1)*(dt*60/60);if(s.x<0){s.x=canvas.width;s.y=Math.random()*canvas.height;}}}
+
+/* ---- mobile pads ---- */
+let touchY=null,firePressed=false,fadeTimer=null;
+const left=document.getElementById("leftPad"),right=document.getElementById("rightPad");
+function showPads(show=true){left.style.opacity=right.style.opacity=show?.6:0;}
+function resetFade(){showPads(true);clearTimeout(fadeTimer);fadeTimer=setTimeout(()=>showPads(false),3000);}
+left.addEventListener("touchstart",e=>{touchY=e.touches[0].clientY;resetFade();});
+left.addEventListener("touchmove",e=>{const y=e.touches[0].clientY;if(y<touchY-10)keys["ArrowUp"]=true;else if(y>touchY+10)keys["ArrowDown"]=true;});
+left.addEventListener("touchend",()=>{keys["ArrowUp"]=keys["ArrowDown"]=false;touchY=null;});
+right.addEventListener("touchstart",()=>{firePressed=true;keys[" "]=true;resetFade();});
+right.addEventListener("touchend",()=>{firePressed=false;keys[" "]=false;});
+
+/* ---- drawing ---- */
+function drawShip(x,y){ctx.save();ctx.translate(x,y);
+ ctx.beginPath();ctx.moveTo(20,0);ctx.lineTo(-12,-10);ctx.lineTo(-8,-4);ctx.lineTo(-8,4);ctx.lineTo(-12,10);ctx.closePath();
+ const g=ctx.createLinearGradient(-12,-10,20,0);g.addColorStop(0,"#ffe761");g.addColorStop(1,"#f7c200");
+ ctx.fillStyle=g;ctx.shadowColor="#ffde59";ctx.shadowBlur=10;ctx.fill();ctx.shadowBlur=0;
+ ctx.beginPath();ctx.moveTo(-12,-5);ctx.lineTo(-20,0);ctx.lineTo(-12,5);ctx.closePath();ctx.fillStyle="rgba(255,200,80,.7)";ctx.fill();ctx.restore();}
+function drawEnemy(e){ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.fillStyle="#ff4b4b";ctx.shadowColor="#ff4b4b";ctx.shadowBlur=8;ctx.fill();ctx.shadowBlur=0;}
+function drawBullet(b){ctx.fillStyle="#ffe761";ctx.fillRect(b.x,b.y,b.w,b.h);}
+function drawHud(){ctx.fillStyle="#ffe761";ctx.font="18px monospace";ctx.fillText("Score:"+score,15,25);ctx.fillText("Level:"+level,15,45);ctx.fillText("HI:"+(localStorage.getItem(hiKey)||0),15,65);}
+
+/* ---- Star Wars crawl ---- */
+function drawCrawl(){
+ drawStars();
+ const txt=["WELCOME NEW JEDI 🚀","","NEON STARFIELD BATTLE","","A long time ago in a galaxy far, far away...","","Press ENTER or TAP to begin"];
+ ctx.save();ctx.translate(canvas.width/2,crawlY);ctx.rotate(-0.2);ctx.scale(1,1.5);
+ ctx.fillStyle="#ffe761";ctx.textAlign="center";ctx.font="28px 'Courier New',monospace";
+ for(let i=0;i<txt.length;i++){ctx.fillText(txt[i],0,i*40);}ctx.restore();
+ crawlY-=0.5;if(crawlY<-300){state="intro";}
+}
+
+/* ---- flow ---- */
+function startGame(){
+ if(!audioUnlocked){
+   try{
+     audioCtx=audioCtx||new(AudioContext||webkitAudioContext)();
+     audioCtx.resume();
+     music.volume=0.3;music.play();
+     audioUnlocked=true;
+   }catch(e){}
+ }
+ sfx(520,"triangle",.12,.08);
+ state="playing";score=0;level=1;bullets.length=enemies.length=0;player.alive=true;
+}
+function restart(){try{music.pause();music.currentTime=0;}catch(e){}state="crawl";crawlY=canvas.height*0.9;makeStars();}
+
+/* ---- update ---- */
+function update(dt){
+ if(state!=="playing")return;
+ if(keys.ArrowUp||keys.w)player.y-=player.speed;
+ if(keys.ArrowDown||keys.s)player.y+=player.speed;
+ player.y=Math.max(player.r,Math.min(canvas.height-player.r,player.y));
+ player.cd-=dt*60;
+ if((keys[" "]||firePressed)&&player.cd<=0){bullets.push({x:player.x+15,y:player.y-2,w:10,h:4,vx:10});sfx(600,"sawtooth",.05,.07);player.cd=12;}
+ for(const b of bullets)b.x+=b.vx;while(bullets.length>0&&bullets[0].x>canvas.width+20)bullets.shift();
+ if(Math.random()<0.015+level*0.004)enemies.push({x:canvas.width+20,y:Math.random()*canvas.height,r:16,vx:3+level*0.35});
+ for(const e of enemies)e.x-=e.vx;while(enemies.length>0&&enemies[0].x<-30)enemies.shift();
+ for(let bi=bullets.length-1;bi>=0;bi--){const b=bullets[bi];
+   for(let ei=enemies.length-1;ei>=0;ei--){const e=enemies[ei];
+     if(b.x<e.x+e.r&&b.x+b.w>e.x-e.r&&b.y<e.y+e.r&&b.y+b.h>e.y-e.r){
+       bullets.splice(bi,1);enemies.splice(ei,1);
+       score+=100;sfx(150,"square",.18,.08);
+       if(score%1000===0)level++;
+       break;
+     }
+   }
+ }
+ for(const e of enemies){
+   if(Math.hypot(e.x-player.x,e.y-player.y)<e.r+player.r){
+     sfx(100,"sawtooth",.3,.1);player.alive=false;state="gameover";
+     const hi=Math.max(score,+(localStorage.getItem(hiKey)||0));
+     localStorage.setItem(hiKey,hi);
+   }
+ }
+}
+
+/* ---- draw ---- */
+function draw(dt){
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ if(state==="crawl"){drawCrawl();return;}
+ drawStars(dt);
+ if(player.alive)drawShip(player.x,player.y);
+ for(const b of bullets)drawBullet(b);
+ for(const e of enemies)drawEnemy(e);
+ drawHud();
+ if(state==="gameover"){
+  ctx.fillStyle="rgba(0,0,0,0.7)";ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#ffe761";ctx.font="44px monospace";
+  const go="GAME OVER";ctx.fillText(go,(canvas.width-ctx.measureText(go).width)/2,canvas.height*.4);
+  ctx.font="22px monospace";
+  const sc=`Score:${score} Level:${level}`;ctx.fillText(sc,(canvas.width-ctx.measureText(sc).width)/2,canvas.height*.48);
+  const hi=localStorage.getItem(hiKey)||0;
+  ctx.fillText("High:"+hi,(canvas.width-ctx.measureText("High:"+hi).width)/2,canvas.height*.54);
+  const msg="Press R or Tap to Restart";ctx.fillText(msg,(canvas.width-ctx.measureText(msg).width)/2,canvas.height*.6);
+ }
+}
+
+/* ---- main loop ---- */
+let last=performance.now();
+function loop(ts){const dt=Math.min(.033,(ts-last)/1e3);last=ts;update(dt);draw(dt);requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+
+/* ---- inputs ---- */
+addEventListener("keydown",e=>{
+ keys[e.key]=true;
+ if((state==="intro"||state==="crawl")&&e.key==="Enter")startGame();
+ if(state==="gameover"&&(e.key==="r"||e.key==="R"))restart();
+});
+addEventListener("keyup",e=>keys[e.key]=false);
+canvas.addEventListener("click",()=>{if(state==="intro"||state==="crawl")startGame();if(state==="gameover")restart();});
+canvas.addEventListener("touchstart",()=>{if(state==="intro"||state==="crawl")startGame();if(state==="gameover")restart();resetFade();},{passive:true});
+</script>
+</body>
+</html>
+
+
